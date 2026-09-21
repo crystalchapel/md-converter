@@ -523,6 +523,122 @@
         }
 
         /* ═══════════════════════════════════════════
+           RESULTS PANEL
+        ═══════════════════════════════════════════ */
+        .results-panel {
+            display: none;
+            margin-top: 1.25rem;
+            border: 1px solid var(--border);
+            border-radius: var(--r);
+            overflow: hidden;
+            background: var(--surface);
+            animation: fadeUp 0.4s var(--ease) both;
+        }
+
+        .results-topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 9px 14px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .results-label {
+            font-size: 0.67rem;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--text-3);
+        }
+
+        .results-count {
+            font-size: 0.67rem;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-3);
+        }
+
+        .results-body {
+            padding: 6px 0;
+            max-height: 240px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: var(--border-2) transparent;
+        }
+
+        .results-body::-webkit-scrollbar { width: 3px; }
+        .results-body::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 3px; }
+
+        .result-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 7px 14px;
+            transition: background 0.12s;
+            animation: logIn 0.25s var(--ease) both;
+        }
+
+        .result-row:hover { background: var(--surface-2); }
+
+        .result-dot {
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: var(--ok);
+            flex-shrink: 0;
+        }
+
+        .result-dot.error { background: var(--fail); }
+
+        .result-name {
+            flex: 1;
+            font-size: 0.78rem;
+            color: var(--text-2);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .result-name.error { color: var(--fail); opacity: 0.7; }
+
+        .result-size {
+            font-size: 0.7rem;
+            color: var(--text-3);
+            font-family: 'JetBrains Mono', monospace;
+            flex-shrink: 0;
+        }
+
+        .btn-dl {
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 10px;
+            font-size: 0.72rem;
+            font-weight: 500;
+            font-family: inherit;
+            color: var(--accent-hi);
+            background: var(--accent-glow);
+            border: 1px solid rgba(124,108,240,0.25);
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.12s, border-color 0.12s;
+            white-space: nowrap;
+        }
+
+        .btn-dl:hover {
+            background: rgba(124,108,240,0.22);
+            border-color: rgba(124,108,240,0.45);
+        }
+
+        .btn-dl svg {
+            width: 10px;
+            height: 10px;
+            stroke: currentColor;
+            flex-shrink: 0;
+        }
+
+        /* ═══════════════════════════════════════════
            SCROLLBAR GLOBAL
         ═══════════════════════════════════════════ */
         ::-webkit-scrollbar { width: 5px; }
@@ -639,6 +755,15 @@
         </div>
     </div>
 
+    <!-- Results / Download panel -->
+    <div class="results-panel" id="resultsPanel" aria-label="Archivos convertidos">
+        <div class="results-topbar">
+            <span class="results-label">Archivos convertidos</span>
+            <span class="results-count" id="resultsCount"></span>
+        </div>
+        <div class="results-body" id="resultsBody"></div>
+    </div>
+
 </div>
 
 <script>
@@ -655,6 +780,7 @@ let files     = [];
 let dirHandle = null;
 let timerRef  = null;
 let startMs   = null;
+let results   = [];   // [{name, content, error}]
 const hasFS   = "showDirectoryPicker" in window;
 
 if (!hasFS) document.getElementById("fallback").style.display = "block";
@@ -728,6 +854,8 @@ async function run() {
     btn.textContent = "Procesando…";
     clearLog();
     startTimer();
+    results = [];
+    document.getElementById("resultsPanel").style.display = "none";
 
     let done = 0, errors = 0;
     setProgress(0, files.length);
@@ -743,10 +871,12 @@ async function run() {
             const md      = await toMarkdown(f);
             const outName = f.name.replace(/\.[^.]+$/, "") + ".md";
             await saveFile(outName, md);
+            results.push({ name: outName, content: md, error: false });
             done++;
             setProgress(done, files.length);
             log(`${f.name}  →  ${outName}`, "success");
         } catch(e) {
+            results.push({ name: f.name, content: null, error: true, msg: e.message });
             errors++;
             log(`${f.name}: ${e.message}`, "error");
         }
@@ -762,6 +892,8 @@ async function run() {
     document.title = "MD Converter";
     btn.disabled    = false;
     btn.textContent = "Convertir";
+
+    renderResults();
 }
 
 // ── Conversión por tipo ────────────────────────────────────────────────────
@@ -840,6 +972,56 @@ function htmlToMd(html) {
         .replace(/&gt;/g, ">").replace(/&nbsp;/g, " ")
         .replace(/\n{3,}/g, "\n\n")
         .trim();
+}
+
+// ── Panel de resultados ────────────────────────────────────────────────────
+function renderResults() {
+    const panel = document.getElementById("resultsPanel");
+    const body  = document.getElementById("resultsBody");
+    const count = document.getElementById("resultsCount");
+    const ok    = results.filter(r => !r.error);
+
+    if (!results.length) return;
+
+    count.textContent = `${ok.length} / ${results.length}`;
+    body.innerHTML = results.map((r, i) => {
+        if (r.error) {
+            return `<div class="result-row" style="animation-delay:${i*40}ms">
+                <span class="result-dot error"></span>
+                <span class="result-name error">${escHtml(r.name)}</span>
+                <span class="result-size" style="color:var(--fail);opacity:.6">error</span>
+            </div>`;
+        }
+        const kb = (new Blob([r.content]).size / 1024).toFixed(1);
+        const dl_svg = `<svg viewBox="0 0 24 24" fill="none" stroke-width="2.2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>`;
+        return `<div class="result-row" style="animation-delay:${i*40}ms">
+            <span class="result-dot"></span>
+            <span class="result-name">${escHtml(r.name)}</span>
+            <span class="result-size">${kb} KB</span>
+            <button class="btn-dl" onclick="dlResult(${i})" title="Descargar ${escHtml(r.name)}">
+                ${dl_svg} Descargar
+            </button>
+        </div>`;
+    }).join("");
+
+    panel.style.display = "block";
+}
+
+function dlResult(idx) {
+    const r = results[idx];
+    if (!r || r.error || !r.content) return;
+    const blob = new Blob([r.content], { type: "text/markdown;charset=utf-8" });
+    const url  = URL.createObjectURL(blob);
+    const a    = Object.assign(document.createElement("a"), { href: url, download: r.name });
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
 // ── Guardar ────────────────────────────────────────────────────────────────
