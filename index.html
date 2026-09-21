@@ -1,0 +1,928 @@
+<!DOCTYPE html>
+<!--
+  MD Converter — Conversor de PDF · DOCX · TXT a Markdown
+  ─────────────────────────────────────────────────────────
+  DESPLIEGUE LOCAL
+    Abre este archivo directamente en Chrome o Edge.
+    Firefox funciona pero descargará los archivos uno a uno (sin selector de carpeta).
+
+  DESPLIEGUE EN GITHUB PAGES (acceso desde cualquier dispositivo)
+    1. Crea un repositorio en github.com (puede ser privado o público)
+    2. Sube este archivo como  index.html
+    3. Ve a Settings → Pages → Source: "Deploy from a branch" → main → / (root)
+    4. En unos segundos tu herramienta estará en:
+       https://TU_USUARIO.github.io/NOMBRE_REPO/
+    5. Abre esa URL desde el Mac, iPhone o cualquier dispositivo con Chrome/Safari
+
+  DEPENDENCIAS (se cargan desde CDN, requieren internet la primera vez)
+    • PDF.js  — Mozilla   — extrae texto de archivos PDF
+    • mammoth — Tim Martin — lee archivos DOCX/DOC
+-->
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MD Converter</title>
+    <meta name="description" content="Convierte PDF, DOCX y TXT a Markdown en el navegador. Sin servidor.">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+
+    <style>
+        /* ═══════════════════════════════════════════
+           TOKENS
+        ═══════════════════════════════════════════ */
+        :root {
+            --bg:          #09090d;
+            --surface:     #101014;
+            --surface-2:   #16161b;
+            --border:      #1e1e26;
+            --border-2:    #2a2a36;
+            --text:        #eeeef3;
+            --text-2:      #868695;
+            --text-3:      #46465a;
+            --accent:      #7c6cf0;
+            --accent-glow: rgba(124, 108, 240, 0.15);
+            --accent-hi:   #9d90f5;
+            --ok:          #4ade80;
+            --fail:        #f87171;
+            --warn:        #f59e0b;
+            --r:           10px;
+            --r-sm:        7px;
+            --ease:        cubic-bezier(0.16, 1, 0.3, 1);
+            --ease-out:    cubic-bezier(0.0, 0.0, 0.2, 1);
+        }
+
+        /* ═══════════════════════════════════════════
+           RESET + BASE
+        ═══════════════════════════════════════════ */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 4rem 1.25rem 6rem;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* ═══════════════════════════════════════════
+           APP WRAPPER
+        ═══════════════════════════════════════════ */
+        .app {
+            width: 100%;
+            max-width: 540px;
+            animation: fadeUp 0.55s var(--ease) both;
+        }
+
+        /* ═══════════════════════════════════════════
+           HEADER
+        ═══════════════════════════════════════════ */
+        .header {
+            margin-bottom: 2.25rem;
+        }
+
+        .wordmark {
+            display: flex;
+            align-items: center;
+            gap: 11px;
+            margin-bottom: 7px;
+        }
+
+        .mark {
+            width: 30px;
+            height: 30px;
+            background: var(--accent);
+            border-radius: 8px;
+            display: grid;
+            place-items: center;
+            flex-shrink: 0;
+            box-shadow: 0 0 0 1px rgba(124,108,240,0.3), 0 4px 16px -2px rgba(124,108,240,0.25);
+        }
+
+        .mark svg {
+            width: 14px;
+            height: 14px;
+            color: #fff;
+        }
+
+        .app-name {
+            font-size: 0.92rem;
+            font-weight: 600;
+            letter-spacing: -0.025em;
+            color: var(--text);
+        }
+
+        .app-desc {
+            font-size: 0.76rem;
+            color: var(--text-3);
+            margin-left: 41px;
+            letter-spacing: 0.01em;
+            line-height: 1.5;
+        }
+
+        /* ═══════════════════════════════════════════
+           DIVIDER
+        ═══════════════════════════════════════════ */
+        .divider {
+            height: 1px;
+            background: var(--border);
+            margin-bottom: 1.75rem;
+        }
+
+        /* ═══════════════════════════════════════════
+           DROP ZONE
+        ═══════════════════════════════════════════ */
+        .drop-zone {
+            position: relative;
+            border: 1px dashed var(--border-2);
+            border-radius: var(--r);
+            padding: 3rem 2rem;
+            text-align: center;
+            cursor: pointer;
+            overflow: hidden;
+            transition: border-color 0.2s, border-style 0.1s;
+            margin-bottom: 1rem;
+            user-select: none;
+        }
+
+        .drop-zone::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(ellipse at 50% 0%, var(--accent-glow), transparent 70%);
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+
+        .drop-zone:hover,
+        .drop-zone.over {
+            border-color: var(--accent);
+            border-style: solid;
+        }
+
+        .drop-zone:hover::after,
+        .drop-zone.over::after {
+            opacity: 1;
+        }
+
+        .drop-zone:hover .zone-icon svg,
+        .drop-zone.over .zone-icon svg {
+            transform: translateY(-3px);
+            stroke: var(--accent);
+        }
+
+        .zone-icon {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 1rem;
+        }
+
+        .zone-icon svg {
+            width: 28px;
+            height: 28px;
+            stroke: var(--text-3);
+            transition: transform 0.35s var(--ease), stroke 0.2s;
+        }
+
+        .zone-label {
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--text-2);
+            margin-bottom: 0.85rem;
+            line-height: 1.5;
+        }
+
+        .zone-formats {
+            display: flex;
+            gap: 5px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .fmt {
+            font-size: 0.67rem;
+            font-weight: 600;
+            letter-spacing: 0.07em;
+            text-transform: uppercase;
+            color: var(--text-3);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 3px 8px;
+        }
+
+        input[type="file"] { display: none; }
+
+        /* ═══════════════════════════════════════════
+           FILE CHIPS
+        ═══════════════════════════════════════════ */
+        .file-list {
+            display: none;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-bottom: 1rem;
+        }
+
+        .chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 5px 10px 5px 8px;
+            font-size: 0.77rem;
+            animation: chipIn 0.3s var(--ease) both;
+        }
+
+        .dot {
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .dot.pdf  { background: var(--fail); }
+        .dot.docx,
+        .dot.doc  { background: #60a5fa; }
+        .dot.txt  { background: var(--ok); }
+        .dot.md   { background: var(--accent-hi); }
+
+        .chip-name { color: var(--text-2); font-weight: 500; }
+        .chip-size { color: var(--text-3); font-size: 0.7rem; }
+
+        /* ═══════════════════════════════════════════
+           FALLBACK NOTE
+        ═══════════════════════════════════════════ */
+        .fallback {
+            display: none;
+            font-size: 0.75rem;
+            color: var(--warn);
+            padding: 9px 13px;
+            background: rgba(245, 158, 11, 0.05);
+            border: 1px solid rgba(245, 158, 11, 0.18);
+            border-radius: var(--r-sm);
+            margin-bottom: 1rem;
+            line-height: 1.5;
+        }
+
+        /* ═══════════════════════════════════════════
+           CONTROLS
+        ═══════════════════════════════════════════ */
+        .controls {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 1.5rem;
+        }
+
+        .btn-folder {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 9px 14px;
+            background: transparent;
+            color: var(--text-3);
+            border: 1px solid var(--border);
+            border-radius: var(--r-sm);
+            cursor: pointer;
+            font-size: 0.81rem;
+            font-weight: 500;
+            font-family: inherit;
+            transition: border-color 0.15s, color 0.15s, background 0.15s;
+            white-space: nowrap;
+        }
+
+        .btn-folder:hover {
+            border-color: var(--border-2);
+            color: var(--text-2);
+            background: var(--surface);
+        }
+
+        .btn-folder.selected {
+            border-color: rgba(74, 222, 128, 0.35);
+            color: var(--ok);
+            background: rgba(74, 222, 128, 0.05);
+        }
+
+        .btn-folder svg { flex-shrink: 0; transition: stroke 0.15s; }
+
+        .folder-name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .btn-convert {
+            padding: 9px 22px;
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            border-radius: var(--r-sm);
+            cursor: pointer;
+            font-size: 0.84rem;
+            font-weight: 500;
+            font-family: inherit;
+            letter-spacing: -0.01em;
+            transition: background 0.15s, box-shadow 0.15s;
+            white-space: nowrap;
+            position: relative;
+        }
+
+        .btn-convert:hover:not(:disabled) {
+            background: var(--accent-hi);
+            box-shadow: 0 0 0 3px rgba(124,108,240,0.2);
+        }
+
+        .btn-convert:disabled {
+            background: var(--surface-2);
+            color: var(--text-3);
+            cursor: not-allowed;
+        }
+
+        /* ═══════════════════════════════════════════
+           PROGRESS
+        ═══════════════════════════════════════════ */
+        .progress-section {
+            margin-bottom: 1.25rem;
+        }
+
+        .progress-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 9px;
+        }
+
+        #progressLabel {
+            font-size: 0.79rem;
+            font-weight: 500;
+            color: var(--text-2);
+            transition: color 0.2s;
+        }
+
+        #progressPct {
+            font-size: 0.72rem;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-3);
+        }
+
+        .bar-wrap {
+            height: 2px;
+            background: var(--border);
+            border-radius: 2px;
+            overflow: hidden;
+            margin-bottom: 7px;
+        }
+
+        .bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent) 0%, var(--accent-hi) 100%);
+            width: 0%;
+            transition: width 0.35s var(--ease-out);
+            border-radius: 2px;
+        }
+
+        .bar-wrap.sub {
+            height: 1px;
+            margin-bottom: 10px;
+            opacity: 0.5;
+        }
+
+        .bar-sub-fill {
+            height: 100%;
+            background: var(--accent);
+            width: 0%;
+            transition: width 0.15s ease;
+        }
+
+        .stats-row {
+            display: flex;
+            align-items: center;
+            gap: 1.25rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--text-3);
+            letter-spacing: 0.02em;
+        }
+
+        .stat-sep {
+            width: 1px;
+            height: 10px;
+            background: var(--border-2);
+        }
+
+        /* ═══════════════════════════════════════════
+           LOG
+        ═══════════════════════════════════════════ */
+        .log-panel {
+            border: 1px solid var(--border);
+            border-radius: var(--r);
+            overflow: hidden;
+            background: var(--surface);
+        }
+
+        .log-topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 9px 14px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .log-traffic {
+            display: flex;
+            gap: 5px;
+            align-items: center;
+        }
+
+        .traffic-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .traffic-dot:nth-child(1) { background: #f87171; opacity: 0.5; }
+        .traffic-dot:nth-child(2) { background: var(--warn); opacity: 0.5; }
+        .traffic-dot:nth-child(3) { background: var(--ok); opacity: 0.5; }
+
+        .log-label {
+            font-size: 0.67rem;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--text-3);
+        }
+
+        .log-body {
+            padding: 12px 14px;
+            max-height: 200px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: var(--border-2) transparent;
+        }
+
+        .log-body::-webkit-scrollbar { width: 3px; }
+        .log-body::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 3px; }
+
+        .log-line {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.72rem;
+            line-height: 1.75;
+            color: var(--text-3);
+            animation: logIn 0.2s var(--ease) both;
+        }
+
+        .log-line .ts {
+            color: var(--border-2);
+            margin-right: 10px;
+            user-select: none;
+        }
+
+        .log-line.success { color: var(--ok); }
+        .log-line.error   { color: var(--fail); }
+        .log-line.info    { color: #60a5fa; }
+        .log-line.warning { color: var(--warn); }
+
+        /* ═══════════════════════════════════════════
+           ANIMATIONS
+        ═══════════════════════════════════════════ */
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes chipIn {
+            from { opacity: 0; transform: scale(0.9) translateY(4px); }
+            to   { opacity: 1; transform: scale(1) translateY(0); }
+        }
+
+        @keyframes logIn {
+            from { opacity: 0; transform: translateX(-4px); }
+            to   { opacity: 1; transform: translateX(0); }
+        }
+
+        /* ═══════════════════════════════════════════
+           RESPONSIVE
+        ═══════════════════════════════════════════ */
+        @media (max-width: 480px) {
+            body { padding: 2rem 1rem 4rem; }
+            .drop-zone { padding: 2rem 1.25rem; }
+            .btn-folder span:not(.folder-name) { display: none; }
+        }
+
+        /* ═══════════════════════════════════════════
+           SCROLLBAR GLOBAL
+        ═══════════════════════════════════════════ */
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 5px; }
+    </style>
+</head>
+<body>
+<div class="app">
+
+    <!-- Header -->
+    <header class="header">
+        <div class="wordmark">
+            <div class="mark" aria-hidden="true">
+                <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6"
+                     stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M2 2h10v10H2z"/>
+                    <path d="M2 7h4.5M9 4.5l2.5 2.5L9 9.5"/>
+                </svg>
+            </div>
+            <span class="app-name">MD Converter</span>
+        </div>
+        <p class="app-desc">PDF · DOCX · TXT a Markdown — sin servidor, sin subir datos</p>
+    </header>
+
+    <div class="divider"></div>
+
+    <!-- Drop zone -->
+    <div class="drop-zone" id="dropZone"
+         role="button" tabindex="0" aria-label="Seleccionar archivos"
+         onclick="document.getElementById('fileInput').click()"
+         onkeydown="if(event.key==='Enter'||event.key===' ')this.click()"
+         ondragover="onDragOver(event)"
+         ondragleave="onDragLeave(event)"
+         ondrop="onDrop(event)">
+        <div class="zone-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+        </div>
+        <p class="zone-label">Arrastra archivos aquí o haz clic para seleccionar</p>
+        <div class="zone-formats" aria-label="Formatos admitidos">
+            <span class="fmt">PDF</span>
+            <span class="fmt">DOCX</span>
+            <span class="fmt">DOC</span>
+            <span class="fmt">TXT</span>
+            <span class="fmt">MD</span>
+        </div>
+    </div>
+
+    <input type="file" id="fileInput" accept=".pdf,.txt,.doc,.docx,.md" multiple
+           onchange="onFileSelect(this.files)" aria-label="Seleccionar archivos">
+
+    <!-- File chips -->
+    <div class="file-list" id="fileList" role="list" aria-label="Archivos seleccionados"></div>
+
+    <!-- Fallback -->
+    <div class="fallback" id="fallback">
+        Tu navegador no permite elegir una carpeta de destino. Los archivos convertidos
+        se descargarán automáticamente uno a uno.
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+        <button class="btn-folder" id="btnFolder" onclick="selectFolder()"
+                aria-label="Seleccionar carpeta de salida">
+            <svg id="folderIcon" width="13" height="13" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+            <span class="folder-name" id="folderName">Carpeta de salida</span>
+        </button>
+        <button class="btn-convert" id="btnConvert" onclick="run()" disabled
+                aria-label="Iniciar conversión">
+            Convertir
+        </button>
+    </div>
+
+    <!-- Progress -->
+    <div class="progress-section" role="status" aria-live="polite" aria-atomic="true">
+        <div class="progress-meta">
+            <span id="progressLabel">Sin archivos seleccionados</span>
+            <span id="progressPct">0%</span>
+        </div>
+        <div class="bar-wrap" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+            <div class="bar-fill" id="barMain"></div>
+        </div>
+        <div class="bar-wrap sub">
+            <div class="bar-sub-fill" id="barSub"></div>
+        </div>
+        <div class="stats-row">
+            <span id="statFiles">0 / 0 archivos</span>
+            <span class="stat-sep" aria-hidden="true"></span>
+            <span id="statTime">00:00</span>
+        </div>
+    </div>
+
+    <!-- Log -->
+    <div class="log-panel" role="log" aria-label="Registro de conversión" aria-live="polite">
+        <div class="log-topbar">
+            <div class="log-traffic" aria-hidden="true">
+                <div class="traffic-dot"></div>
+                <div class="traffic-dot"></div>
+                <div class="traffic-dot"></div>
+            </div>
+            <span class="log-label">Output</span>
+            <div style="width:44px"></div>
+        </div>
+        <div class="log-body" id="logBody">
+            <div class="log-line"><span class="ts" aria-hidden="true">--:--:--</span>Listo</div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+"use strict";
+
+// ── PDF.js ─────────────────────────────────────────────────────────────────
+if (typeof pdfjsLib !== "undefined") {
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+}
+
+// ── Estado ─────────────────────────────────────────────────────────────────
+let files     = [];
+let dirHandle = null;
+let timerRef  = null;
+let startMs   = null;
+const hasFS   = "showDirectoryPicker" in window;
+
+if (!hasFS) document.getElementById("fallback").style.display = "block";
+
+// ── Drag & drop ────────────────────────────────────────────────────────────
+function onDragOver(e) {
+    e.preventDefault();
+    document.getElementById("dropZone").classList.add("over");
+}
+function onDragLeave() {
+    document.getElementById("dropZone").classList.remove("over");
+}
+function onDrop(e) {
+    e.preventDefault();
+    document.getElementById("dropZone").classList.remove("over");
+    const valid = [...e.dataTransfer.files]
+        .filter(f => /\.(pdf|txt|doc|docx|md)$/i.test(f.name));
+    onFileSelect(valid);
+}
+
+// ── Selección de archivos ──────────────────────────────────────────────────
+function onFileSelect(list) {
+    files = [...list];
+    renderChips();
+    document.getElementById("btnConvert").disabled = !files.length;
+    setLabel(files.length
+        ? `${files.length} archivo${files.length > 1 ? "s" : ""} seleccionado${files.length > 1 ? "s" : ""}`
+        : "Sin archivos seleccionados");
+}
+
+function renderChips() {
+    const el = document.getElementById("fileList");
+    if (!files.length) { el.style.display = "none"; return; }
+    el.style.display = "flex";
+    el.innerHTML = files.map((f, i) => {
+        const ext  = f.name.split(".").pop().toLowerCase();
+        const size = f.size < 1048576
+            ? `${(f.size / 1024).toFixed(0)} KB`
+            : `${(f.size / 1048576).toFixed(1)} MB`;
+        return `<div class="chip" role="listitem" style="animation-delay:${i * 35}ms">
+            <span class="dot ${ext}" aria-label="${ext.toUpperCase()}"></span>
+            <span class="chip-name">${escHtml(f.name)}</span>
+            <span class="chip-size">${size}</span>
+        </div>`;
+    }).join("");
+}
+
+// ── Selección de carpeta ───────────────────────────────────────────────────
+async function selectFolder() {
+    if (!hasFS) return;
+    try {
+        dirHandle = await window.showDirectoryPicker({ mode: "readwrite" });
+        const btn    = document.getElementById("btnFolder");
+        const nameEl = document.getElementById("folderName");
+        const icon   = document.getElementById("folderIcon");
+        nameEl.textContent = dirHandle.name;
+        btn.classList.add("selected");
+        icon.innerHTML = `<polyline points="20 6 9 17 4 12"
+            stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`;
+        log(`Carpeta: ${dirHandle.name}`, "info");
+    } catch(e) {
+        if (e.name !== "AbortError") log(`Error: ${e.message}`, "error");
+    }
+}
+
+// ── Proceso principal ──────────────────────────────────────────────────────
+async function run() {
+    if (!files.length) return;
+    const btn = document.getElementById("btnConvert");
+    btn.disabled = true;
+    btn.textContent = "Procesando…";
+    clearLog();
+    startTimer();
+
+    let done = 0, errors = 0;
+    setProgress(0, files.length);
+    log(`Iniciando: ${files.length} archivo${files.length > 1 ? "s" : ""}`, "info");
+    document.title = "Convirtiendo… — MD Converter";
+
+    for (const f of files) {
+        setLabel(`Procesando ${f.name}`);
+        log(f.name);
+        updateStats(done, files.length);
+
+        try {
+            const md      = await toMarkdown(f);
+            const outName = f.name.replace(/\.[^.]+$/, "") + ".md";
+            await saveFile(outName, md);
+            done++;
+            setProgress(done, files.length);
+            log(`${f.name}  →  ${outName}`, "success");
+        } catch(e) {
+            errors++;
+            log(`${f.name}: ${e.message}`, "error");
+        }
+
+        updateStats(done, files.length);
+    }
+
+    stopTimer();
+    setSub(0);
+    const okMsg = `${done} archivo${done !== 1 ? "s" : ""} convertido${done !== 1 ? "s" : ""}`;
+    setLabel(errors === 0 ? okMsg : `${okMsg} · ${errors} con error`);
+    log("Proceso finalizado", "info");
+    document.title = "MD Converter";
+    btn.disabled    = false;
+    btn.textContent = "Convertir";
+}
+
+// ── Conversión por tipo ────────────────────────────────────────────────────
+async function toMarkdown(f) {
+    const ext = f.name.split(".").pop().toLowerCase();
+    if (ext === "txt")                   return txtToMd(f);
+    if (ext === "md")                    return readText(f);
+    if (ext === "pdf")                   return pdfToMd(f);
+    if (ext === "doc" || ext === "docx") return docxToMd(f);
+    throw new Error("Formato no soportado");
+}
+
+async function txtToMd(f) {
+    const raw   = await readText(f);
+    const title = f.name.replace(/\.txt$/i, "");
+    const body  = raw.split(/\n{2,}/).map(p => p.trim()).filter(Boolean).join("\n\n");
+    return `# ${title}\n\n${body}\n`;
+}
+
+async function pdfToMd(f) {
+    if (typeof pdfjsLib === "undefined")
+        throw new Error("PDF.js no disponible (comprueba tu conexión a internet)");
+
+    const buf   = await f.arrayBuffer();
+    const pdf   = await pdfjsLib.getDocument({ data: buf }).promise;
+    const title = f.name.replace(/\.pdf$/i, "");
+    const n     = pdf.numPages;
+    log(`  ${n} página${n !== 1 ? "s" : ""}`, "info");
+    let md = `# ${title}\n\n`;
+
+    for (let i = 1; i <= n; i++) {
+        setSub(i / n);
+        if (i % 10 === 0 || i === n) log(`  Página ${i}/${n}`);
+        const page    = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        let text = "", lastY = null;
+        for (const item of content.items) {
+            const y = item.transform[5];
+            if (lastY !== null && Math.abs(y - lastY) > 2) text += "\n";
+            text += item.str;
+            lastY = y;
+        }
+        const clean = text.replace(/\n{3,}/g, "\n\n").trim();
+        if (clean) md += `${clean}\n\n---\n\n`;
+    }
+
+    setSub(0);
+    return md;
+}
+
+async function docxToMd(f) {
+    if (typeof mammoth === "undefined")
+        throw new Error("mammoth.js no disponible (comprueba tu conexión a internet)");
+
+    const buf    = await f.arrayBuffer();
+    const result = await mammoth.convertToHtml({ arrayBuffer: buf });
+    const title  = f.name.replace(/\.docx?$/i, "");
+    return `# ${title}\n\n${htmlToMd(result.value)}\n`;
+}
+
+function htmlToMd(html) {
+    return html
+        .replace(/<h1[^>]*>(.*?)<\/h1>/gi,             "# $1\n\n")
+        .replace(/<h2[^>]*>(.*?)<\/h2>/gi,             "## $1\n\n")
+        .replace(/<h3[^>]*>(.*?)<\/h3>/gi,             "### $1\n\n")
+        .replace(/<h4[^>]*>(.*?)<\/h4>/gi,             "#### $1\n\n")
+        .replace(/<strong[^>]*>(.*?)<\/strong>/gi,     "**$1**")
+        .replace(/<b[^>]*>(.*?)<\/b>/gi,               "**$1**")
+        .replace(/<em[^>]*>(.*?)<\/em>/gi,             "*$1*")
+        .replace(/<i[^>]*>(.*?)<\/i>/gi,               "*$1*")
+        .replace(/<li[^>]*>(.*?)<\/li>/gi,             "- $1\n")
+        .replace(/<br\s*\/?>/gi,                       "\n")
+        .replace(/<p[^>]*>(.*?)<\/p>/gi,               "$1\n\n")
+        .replace(/<[^>]+>/g,                           "")
+        .replace(/&amp;/g, "&").replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">").replace(/&nbsp;/g, " ")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+}
+
+// ── Guardar ────────────────────────────────────────────────────────────────
+async function saveFile(name, content) {
+    if (hasFS && dirHandle) {
+        const fh       = await dirHandle.getFileHandle(name, { create: true });
+        const writable = await fh.createWritable();
+        await writable.write(content);
+        await writable.close();
+    } else {
+        const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+        const url  = URL.createObjectURL(blob);
+        const a    = Object.assign(document.createElement("a"), { href: url, download: name });
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1500);
+    }
+}
+
+// ── UI helpers ─────────────────────────────────────────────────────────────
+function setProgress(done, total) {
+    const p = total ? Math.round(done / total * 100) : 0;
+    const bar = document.getElementById("barMain");
+    bar.style.width = p + "%";
+    bar.parentElement.setAttribute("aria-valuenow", p);
+    document.getElementById("progressPct").textContent = p + "%";
+}
+
+function setSub(r) {
+    document.getElementById("barSub").style.width = (r * 100) + "%";
+}
+
+function setLabel(t) {
+    document.getElementById("progressLabel").textContent = t;
+}
+
+function updateStats(done, total) {
+    document.getElementById("statFiles").textContent =
+        `${done} / ${total} archivo${total !== 1 ? "s" : ""}`;
+}
+
+function log(msg, type) {
+    const body = document.getElementById("logBody");
+    const line = document.createElement("div");
+    line.className = "log-line" + (type ? ` ${type}` : "");
+    const t = new Date().toLocaleTimeString("es-ES", { hour12: false });
+    line.innerHTML = `<span class="ts" aria-hidden="true">${t}</span>${escHtml(msg)}`;
+    body.appendChild(line);
+    body.scrollTop = body.scrollHeight;
+}
+
+function clearLog() {
+    document.getElementById("logBody").innerHTML = "";
+}
+
+function startTimer() {
+    startMs  = Date.now();
+    timerRef = setInterval(() => {
+        const ms = Date.now() - startMs;
+        const m  = String(Math.floor(ms / 60000)).padStart(2, "0");
+        const s  = String(Math.floor(ms % 60000 / 1000)).padStart(2, "0");
+        document.getElementById("statTime").textContent = `${m}:${s}`;
+    }, 500);
+}
+
+function stopTimer() { clearInterval(timerRef); }
+
+function readText(f) {
+    return new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload  = e => res(e.target.result);
+        r.onerror = () => rej(new Error("Error de lectura"));
+        r.readAsText(f, "UTF-8");
+    });
+}
+
+function escHtml(str) {
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+}
+</script>
+</body>
+</html>
